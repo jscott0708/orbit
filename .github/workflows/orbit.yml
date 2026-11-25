@@ -63,7 +63,7 @@ jobs:
           # GitHub's machines come with the Android SDK: accept its licences and fetch the platform Firefox's engine needs
           SDKM="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | sort -V | tail -1)/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
-          "$SDKM" "platforms;android-37" > /dev/null || echo "(platform 37 is fetched by the build itself)"
+          "$SDKM" "platforms;android-37.2" > /dev/null || echo "(platform 37.2 is fetched by the build itself)"
           chmod +x gradlew
           ./gradlew --no-daemon assembleRelease -PgeckoviewVersion=${{ steps.engine.outputs.version }}
 

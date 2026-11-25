@@ -16,7 +16,10 @@ val ciKeystore: String? = System.getenv("ORBIT_KEYSTORE")
 
 android {
     namespace = "com.intentionalmovement.orbit"
-    compileSdk = 37   // Firefox's engine is built against the newest Android SDK; Android Studio downloads it if asked
+    // Firefox's engine is built against the newest Android SDK (37.2); Android Studio downloads it if asked
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
 
     defaultConfig {
         applicationId = "com.intentionalmovement.orbit"
