@@ -50,9 +50,6 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
-        if: steps.engine.outputs.build == 'yes'
-
       - name: Build and sign
         if: steps.engine.outputs.build == 'yes'
         env:
@@ -63,7 +60,10 @@ jobs:
         run: |
           if [ -z "${{ secrets.ORBIT_KEYSTORE_BASE64 }}" ]; then echo "Add the signing secrets first (README → Automatic updates)"; exit 1; fi
           echo "${{ secrets.ORBIT_KEYSTORE_BASE64 }}" | base64 -d > "$ORBIT_KEYSTORE"
-          yes | sdkmanager --licenses > /dev/null || true
+          # GitHub's machines come with the Android SDK: accept its licences and fetch the platform Firefox's engine needs
+          SDKM="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | sort -V | tail -1)/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-37" > /dev/null || echo "(platform 37 is fetched by the build itself)"
           chmod +x gradlew
           ./gradlew --no-daemon assembleRelease -PgeckoviewVersion=${{ steps.engine.outputs.version }}
 
