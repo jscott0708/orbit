@@ -1,0 +1,82 @@
+# Orbit's automatic builds: every day, check Mozilla for a new Firefox engine (security fixes come every few weeks).
+# When there is one, build Orbit with it, sign it with your key, and publish it as a GitHub release; Orbit on the phone
+# finds it and installs it. "Run workflow" builds now, whether or not the engine changed.
+#
+# One-time setup (see README): repository secrets ORBIT_KEYSTORE_BASE64, ORBIT_KEYSTORE_PASSWORD, ORBIT_KEY_ALIAS,
+# ORBIT_KEY_PASSWORD.
+name: Orbit build
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is there a new Firefox engine?
+        id: engine
+        run: |
+          v=$(curl -fsSL https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview-arm64-v8a/maven-metadata.xml | sed -n 's:.*<release>\(.*\)</release>.*:\1:p' | head -1)
+          if [ -z "$v" ]; then echo "Could not read Mozilla's engine list"; exit 1; fi
+          last=$(cat engine.txt 2>/dev/null || true)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Newest engine: $v   last built: ${last:-none}"
+          if [ "$v" = "$last" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "build=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Keep the daily check alive
+        # GitHub pauses scheduled builds in a repository with no activity for 60 days
+        if: steps.engine.outputs.build == 'no'
+        run: |
+          age=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          if [ "$age" -ge 45 ]; then
+            git config user.name "Orbit build"; git config user.email "orbit-build@users.noreply.github.com"
+            date -u +%F > keepalive.txt; git add keepalive.txt; git commit -m "Keep the daily engine check running"; git push
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.engine.outputs.build == 'yes'
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+        if: steps.engine.outputs.build == 'yes'
+
+      - name: Build and sign
+        if: steps.engine.outputs.build == 'yes'
+        env:
+          ORBIT_KEYSTORE: ${{ runner.temp }}/orbit.jks
+          ORBIT_KEYSTORE_PASSWORD: ${{ secrets.ORBIT_KEYSTORE_PASSWORD }}
+          ORBIT_KEY_ALIAS: ${{ secrets.ORBIT_KEY_ALIAS }}
+          ORBIT_KEY_PASSWORD: ${{ secrets.ORBIT_KEY_PASSWORD }}
+        run: |
+          if [ -z "${{ secrets.ORBIT_KEYSTORE_BASE64 }}" ]; then echo "Add the signing secrets first (README → Automatic updates)"; exit 1; fi
+          echo "${{ secrets.ORBIT_KEYSTORE_BASE64 }}" | base64 -d > "$ORBIT_KEYSTORE"
+          yes | sdkmanager --licenses > /dev/null || true
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease -PgeckoviewVersion=${{ steps.engine.outputs.version }}
+
+      - name: Publish the release
+        if: steps.engine.outputs.build == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          meta=app/build/outputs/apk/release/output-metadata.json
+          code=$(python3 -c "import json;print(json.load(open('$meta'))['elements'][0]['versionCode'])")
+          cp app/build/outputs/apk/release/app-release.apk orbit.apk
+          gh release create "v$code" orbit.apk --title "Orbit $code · Firefox engine ${{ steps.engine.outputs.version }}" \
+            --notes "Built automatically with Firefox's engine ${{ steps.engine.outputs.version }} (security fixes). Orbit on the phone installs it by itself."
+          echo "${{ steps.engine.outputs.version }}" > engine.txt
+          git config user.name "Orbit build"; git config user.email "orbit-build@users.noreply.github.com"
+          git add engine.txt; git commit -m "Built with Firefox engine ${{ steps.engine.outputs.version }}"; git push
